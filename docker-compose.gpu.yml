@@ -1,0 +1,12 @@
+# GPU override for the training server (needs NVIDIA Container Toolkit):
+#   TRAIN_VARIANT=gpu docker compose -f docker-compose.yml -f docker-compose.gpu.yml \
+#     --profile train run --rm train parcel-ocr train-rec
+services:
+  train:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

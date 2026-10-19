@@ -1,0 +1,51 @@
+# Everything runs in containers — nothing is installed on the host.
+COMPOSE      := docker compose
+RUN          := $(COMPOSE) --profile tools run --rm pipeline
+RUN_TRAIN    := $(COMPOSE) --profile train run --rm train
+GPU_COMPOSE  := $(COMPOSE) -f docker-compose.yml -f docker-compose.gpu.yml
+
+.PHONY: help env build build-train up down test lint init base-models retrain status shell benchmark-thai
+
+help:            ## list targets
+	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
+
+env:             ## create .env from the template (edit secrets afterwards)
+	@test -f .env || cp .env.example .env
+
+build: env       ## build core + test + mlflow images
+	$(COMPOSE) build init mlflow
+	$(COMPOSE) --profile test build test
+
+build-train: env ## build the training image (linux/amd64; slow under emulation on Apple Silicon)
+	$(COMPOSE) --profile train build train
+
+up: env          ## start infra: postgres, seaweedfs, mlflow, label-studio
+	$(COMPOSE) up -d
+
+down:            ## stop infra (volumes kept)
+	$(COMPOSE) down
+
+test: env        ## run the test suite in the test image
+	$(COMPOSE) --profile test run --rm test
+
+lint: env        ## ruff in the test image
+	$(COMPOSE) --profile test run --rm test ruff check src tests
+
+init: up         ## create data dirs (DVC deps)
+	$(RUN) parcel-ocr infra init-dirs
+
+base-models:     ## one-off: download pretrained PaddleOCR models into artifacts/base, then dvc add
+	$(RUN_TRAIN) sh -c "parcel-ocr fetch-base-models && dvc add artifacts/base"
+
+retrain:         ## one supervised cycle (trigger → repro → gate → register challenger)
+	$(RUN_TRAIN) parcel-ocr retrain
+
+benchmark-thai: env ## ThaiOCRBench, 4 OCR tasks (LIMIT=20 smoke run; ARGS="--bundle artifacts/bundle")
+	$(COMPOSE) --profile train run --rm --no-deps train \
+		parcel-ocr benchmark-thai $(if $(LIMIT),--limit $(LIMIT)) $(ARGS)
+
+status:          ## champion / challenger / previous
+	$(RUN) parcel-ocr status
+
+shell:           ## shell in the core image
+	$(RUN) bash

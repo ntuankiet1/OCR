@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Environment
+.env
+
+# Data and artifacts are versioned by DVC, not git.
+# data/frozen/ (frozen split lists) is small text and IS tracked by git on purpose.
+/data/labels/
+/data/images_index/
+/data/images/
+/data/snapshots/
+/data/exports/
+/data/benchmarks/
+/artifacts/
+/reports/
+mlruns/
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
+
+# Client documents (BRD) stay local — the repo is public.
+/docs/*.pdf

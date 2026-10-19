@@ -1,0 +1,70 @@
+# Pipeline parameters. DVC tracks changes per section: editing a section re-runs only the
+# stages that declare it under `params:` in dvc.yaml.
+
+split:
+  # Deterministic hash split on group_key (tracking number, else job id): a parcel never moves
+  # between splits across snapshots. Frozen sets (data/frozen/*.txt) take precedence.
+  salt: "parcel-ocr-v1"        # changing this reshuffles train/val/calibration — avoid
+  val_fraction: 0.05           # checkpoint selection / early stopping
+  calibration_fraction: 0.10   # confidence calibration + threshold selection
+
+trigger:
+  # `parcel-ocr retrain` starts a cycle when either condition holds (or with --force).
+  min_new_verified_labels: 1000
+  max_days_since_last_snapshot: 7
+
+train_rec:
+  base_config: configs/rec/PP-OCRv5/multi_language/th_PP-OCRv5_mobile_rec.yaml   # inside PaddleOCR repo
+  pretrained_url: https://paddle-model-ecology.bj.bcebos.com/paddlex/official_pretrained_model/th_PP-OCRv5_mobile_rec_pretrained.pdparams
+  epochs: 30
+  learning_rate: 0.0002        # lower than upstream 5e-4: fine-tuning, not training from scratch
+  warmup_epochs: 2
+  batch_size: 64
+  num_workers: 4
+  use_gpu: false               # set true on the training server
+
+train_type_size:
+  model: mobilenetv3_large_100   # timm name; ~5.5M params
+  image_size: 320
+  epochs: 25
+  batch_size: 32
+  learning_rate: 0.0005
+  weight_decay: 0.05
+  label_smoothing: 0.1
+  num_workers: 4
+  seed: 42
+
+base_models:
+  # Pretrained inference models bundled as-is until we fine-tune them (no runtime downloads:
+  # BRD §9 requires testing with internet disabled). `rec` is the fallback when no fine-tuned
+  # recognizer exists yet (first bundle = off-the-shelf baseline).
+  det: PP-OCRv5_mobile_det
+  rec: th_PP-OCRv5_mobile_rec
+  doc_orientation: PP-LCNet_x1_0_doc_ori
+  textline_orientation: PP-LCNet_x1_0_textline_ori
+
+quality:
+  blur_laplacian_min: 60.0     # below → "image_blurry"
+  glare_ratio_max: 0.08        # share of near-saturated pixels above → "image_glare"
+
+matching:
+  min_score: 90                # rapidfuzz score (0-100) to consider a candidate
+  min_margin: 8                # best - second best; below → ambiguous → review (BR04)
+
+calibration:
+  # Per-field auto-accept threshold = lowest confidence whose accepted subset has a
+  # Clopper-Pearson lower bound >= target_precision (BR05: proven on real data, not assumed).
+  target_precision: 0.995
+  alpha: 0.05
+  min_accepted: 200            # fewer accepted samples than this → no threshold → always review
+  fields: [recipient_name, unit, carrier, tracking_number, type_size]
+
+gate:
+  max_wrong_assignments: 0     # hard block (BRD §9 / AC03)
+  max_field_drop_pp: 0.2       # per-field exact-match drop vs champion, percentage points
+  mcnemar_alpha: 0.05          # paired test: challenger significantly worse → fail
+  subgroup_min_n: 100
+  max_subgroup_drop_pp: 1.0    # per carrier / capture mode / property
+  max_auto_rate_drop_pp: 0.2
+  max_latency_p95_ms: 1500     # OCR pipeline only, reference CPU — not end-to-end time
+  min_field_accuracy: {}       # absolute floors, e.g. {tracking_number: 0.99}; applied also without a champion

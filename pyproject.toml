@@ -1,0 +1,58 @@
+[project]
+name = "parcel-ocr"
+version = "0.1.0"
+description = "Smartworld Parcel OCR — supervised training pipeline with data and model versioning"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy>=2.1",
+    "pandas>=2.2",
+    "pyarrow>=17",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "pyyaml>=6.0",
+    "typer>=0.15",
+    "scipy>=1.14",
+    "scikit-learn>=1.5",
+    "rapidfuzz>=3.10",
+    # <5: paddlex pins opencv 4.x in the train image; keep one cv2 major across images.
+    "opencv-python-headless>=4.10,<5",
+    "zxing-cpp>=2.3",
+    "mlflow>=3.5,<4",
+    "boto3>=1.35",
+    "dvc[s3]>=3.55",
+    # ThaiOCRBench official metrics (BLEU/METEOR + Thai word tokenization)
+    "nltk>=3.9",
+    "pythainlp>=5.0",
+]
+
+# The training stack (paddlepaddle, paddleocr, torch, timm, onnx) is NOT declared here:
+# it needs per-device wheels (CPU vs CUDA) from vendor indexes, so it is pinned in
+# docker/train/requirements-{cpu,gpu}.txt and installed only in the `train` image.
+
+[project.scripts]
+parcel-ocr = "src.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]

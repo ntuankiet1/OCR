@@ -1,0 +1,146 @@
+# Retraining pipeline. `dvc repro` re-runs only stages whose deps/params changed; dvc.lock
+# records the exact data, params and outputs of every cycle (commit it).
+#
+# Run inside the train image:  docker compose --profile train run --rm train parcel-ocr retrain
+# (retrain = trigger check → dvc add raw data → re-score champion → dvc repro → register)
+
+stages:
+  snapshot:
+    cmd: parcel-ocr snapshot
+    deps:
+      - data/labels
+      - data/images_index
+      - data/frozen
+      - src/data
+    params:
+      - split
+    outs:
+      - data/snapshots/current/images.parquet
+      - data/snapshots/current/labels.parquet
+    metrics:
+      - data/snapshots/current/stats.json:
+          cache: false
+
+  export:
+    cmd: parcel-ocr export
+    deps:
+      - data/snapshots/current/images.parquet
+      - data/snapshots/current/labels.parquet
+      - src/data/export.py
+    outs:
+      - data/exports
+
+  train_rec:
+    cmd: parcel-ocr train-rec
+    deps:
+      - data/exports/rec
+      - src/training/rec.py
+    params:
+      - train_rec
+    outs:
+      - artifacts/rec
+
+  train_type_size:
+    cmd: parcel-ocr train-type-size
+    deps:
+      - data/exports/type_size
+      - src/training/type_size.py
+    params:
+      - train_type_size
+    outs:
+      - artifacts/type_size
+
+  # Bundle without thresholds → scores the calibration split.
+  assemble_provisional:
+    cmd: parcel-ocr assemble --provisional --out artifacts/bundle_provisional
+    deps:
+      - artifacts/base
+      - artifacts/rec
+      - artifacts/type_size
+      - configs
+      - src/registry/bundle.py
+    params:
+      - base_models
+      - quality
+      - matching
+      - train_type_size.image_size
+    outs:
+      - artifacts/bundle_provisional
+
+  predict_calibration:
+    cmd: parcel-ocr predict --bundle artifacts/bundle_provisional --split calibration --out artifacts/predictions/calibration
+    deps:
+      - artifacts/bundle_provisional
+      - data/snapshots/current/images.parquet
+      - data/rosters
+      - src/inference
+    outs:
+      - artifacts/predictions/calibration
+
+  calibrate:
+    cmd: parcel-ocr calibrate
+    deps:
+      - artifacts/predictions/calibration
+      - artifacts/type_size
+      - data/snapshots/current/labels.parquet
+      - src/calibration
+    params:
+      - calibration
+    outs:
+      - artifacts/calibration/calibration.json
+
+  assemble:
+    cmd: parcel-ocr assemble --out artifacts/bundle
+    deps:
+      - artifacts/base
+      - artifacts/rec
+      - artifacts/type_size
+      - artifacts/calibration/calibration.json
+      - configs
+      - src/registry/bundle.py
+    params:
+      - base_models
+      - quality
+      - matching
+      - train_type_size.image_size
+    outs:
+      - artifacts/bundle
+
+  predict_regression:
+    cmd: parcel-ocr predict --bundle artifacts/bundle --split regression --out artifacts/predictions/regression
+    deps:
+      - artifacts/bundle
+      - data/snapshots/current/images.parquet
+      - data/rosters
+      - src/inference
+    outs:
+      - artifacts/predictions/regression
+
+  evaluate:
+    cmd: parcel-ocr evaluate --pred artifacts/predictions/regression --split regression --out reports/challenger
+    deps:
+      - artifacts/predictions/regression
+      - data/snapshots/current/images.parquet
+      - data/snapshots/current/labels.parquet
+      - data/frozen
+      - src/evaluation
+    outs:
+      - reports/challenger/correctness.parquet
+      - reports/challenger/wrong_assignments.parquet
+    metrics:
+      - reports/challenger/metrics.json:
+          cache: false
+
+  # Champion metrics (reports/champion) are produced by `parcel-ocr evaluate-champion` before
+  # repro; the gate always re-runs so it never compares against a stale champion.
+  gate:
+    cmd: parcel-ocr gate --challenger reports/challenger --champion reports/champion --out reports/gate.json
+    deps:
+      - reports/challenger/metrics.json
+      - reports/challenger/correctness.parquet
+    params:
+      - gate
+    always_changed: true
+    outs:
+      - reports/gate.json:
+          cache: false

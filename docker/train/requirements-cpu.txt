@@ -1,0 +1,10 @@
+# Training stack, CPU build (dev / CI). Installed only in the `train` image.
+--extra-index-url https://download.pytorch.org/whl/cpu
+paddlepaddle==3.3.1
+paddleocr==3.7.0
+torch==2.14.1
+torchvision
+timm==1.0.30
+onnx==1.23.2
+onnxruntime==1.31.0
+paddle2onnx==2.1.0

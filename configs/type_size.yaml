@@ -1,0 +1,13 @@
+# Parcel type/size values — BRD §7 (IDs 1-10 confirmed). Size definitions and reference images
+# are still an open decision (BRD §12); the classifier abstains (blank → review) when unsure.
+classes:
+  1: Small envelope
+  2: Medium envelope
+  3: Large envelope
+  4: Small bag / wrapped parcel
+  5: Medium bag / wrapped parcel
+  6: Large bag / wrapped parcel
+  7: Small box
+  8: Medium box
+  9: Large box
+  10: Extra-large box
