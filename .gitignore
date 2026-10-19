@@ -37,3 +37,6 @@ mlruns/
 
 # Notebook demo workspaces (notebooks/run_pipeline.ipynb)
 /.workspace/
+
+# Output of scripts/thai_ocr_benchmark.py
+/benchmark_results/
