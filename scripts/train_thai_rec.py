@@ -32,7 +32,7 @@ MODELS = {
         "pretrained": "th_PP-OCRv5_mobile_rec",
         "model_name": "th_PP-OCRv5_mobile_rec",
         "epochs": 20,
-        "batch_size": 128,
+        "batch_size": 32,
         "lr": 0.0002,  # fine-tune: lower LR than upstream 5e-4
         "extra": {},
     },
