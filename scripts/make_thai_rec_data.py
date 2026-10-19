@@ -62,7 +62,18 @@ TEST_FONTS = {"k2d/K2D-Regular.ttf", "niramit/Niramit-Regular.ttf"}  # one loopl
 STYLE_WEIGHTS = {"loopless": 0.45, "looped": 0.35, "tlwg": 0.20}  # share of lines per font style
 # Thai system fonts (fonts-thai-tlwg) are added when installed; handwriting styles are skipped.
 TLWG_DIRS = ["/usr/share/fonts/opentype/tlwg", "/usr/share/fonts/truetype/tlwg"]
-TLWG_SKIP = ("Purisa", "Sawasdee", "Oblique", "Italic")
+# Skipped: handwriting styles, slanted variants, and the monospace family — TlwgMono places
+# Thai marks wrongly (image would not match its label) and typewriter fonts are not label print.
+TLWG_SKIP = (
+    "Purisa",
+    "Sawasdee",
+    "Oblique",
+    "Italic",
+    "TlwgMono",
+    "TlwgTypo",
+    "TlwgTypist",
+    "TlwgTypewriter",
+)
 DICT_URL = "https://raw.githubusercontent.com/PaddlePaddle/PaddleOCR/v3.7.0/ppocr/utils/dict/ppocrv5_th_dict.txt"
 MAX_LEN = 25  # PaddleOCR rec configs: max_text_length 25 (longer labels are dropped in training)
 
@@ -412,16 +423,20 @@ def render(text: str, font_path: Path, rng: random.Random) -> Image.Image:
     left, top, right, bottom = font.getbbox(text)
     pad_x, pad_y = rng.randint(3, 18), rng.randint(3, 12)
     w, h = right - left + 2 * pad_x, bottom - top + 2 * pad_y
+    # Labels are white/grey paper: one grey level plus a slight camera white-balance tint
+    # (at most ±6 per channel), never pastel colours.
+    tint = [rng.randint(-6, 6) for _ in range(3)]
+
+    def paper(level: int) -> tuple[int, int, int]:
+        return tuple(max(0, min(255, level + t)) for t in tint)
+
     r = rng.random()
     if r < 0.80:  # thermal / white label: dark text on white or off-white
-        bg = tuple(rng.randint(225, 255) for _ in range(3))
-        fg = (rng.randint(0, 70),) * 3
+        bg, fg = paper(rng.randint(222, 252)), (rng.randint(0, 70),) * 3
     elif r < 0.93:  # grey paper, faded print
-        bg = tuple(rng.randint(170, 225) for _ in range(3))
-        fg = (rng.randint(20, 110),) * 3
+        bg, fg = paper(rng.randint(170, 222)), (rng.randint(20, 110),) * 3
     else:  # inverted header bars (e.g. COD, carrier name)
-        bg = (rng.randint(0, 50),) * 3
-        fg = (rng.randint(215, 255),) * 3
+        bg, fg = paper(rng.randint(0, 50)), (rng.randint(215, 255),) * 3
     img = Image.new("RGB", (w, h), bg)
     ImageDraw.Draw(img).text((pad_x - left, pad_y - top), text, font=font, fill=fg)
 
