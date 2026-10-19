@@ -3,7 +3,7 @@ name = "parcel-ocr"
 version = "0.1.0"
 description = "Smartworld Parcel OCR — supervised training pipeline with data and model versioning"
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "numpy>=2.1",
     "pandas>=2.2",
@@ -24,6 +24,9 @@ dependencies = [
     # ThaiOCRBench official metrics (BLEU/METEOR + Thai word tokenization)
     "nltk>=3.9",
     "pythainlp>=5.0",
+    # Synthetic demo labels (src/data/synthetic.py)
+    "pillow>=11.0",
+    "python-barcode>=0.15",
 ]
 
 # The training stack (paddlepaddle, paddleocr, torch, timm, onnx) is NOT declared here:

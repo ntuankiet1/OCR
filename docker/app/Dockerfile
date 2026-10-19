@@ -3,7 +3,7 @@
 # One Dockerfile, three targets:
 #   core  — data versioning, snapshots, calibration, evaluation, gate, registry (multi-arch)
 #   test  — core + dev deps; runs the test suite at build time
-#   train — core + PaddleOCR/Paddle + PyTorch/timm (linux/amd64 only: no paddle arm64 wheels)
+#   train — core + PaddleOCR/Paddle + PyTorch/timm (amd64 or arm64, see TRAIN_PLATFORM)
 
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.19
@@ -20,8 +20,9 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 # git: DVC needs it. libgl1/libglib2.0-0: OpenCV (paddlex pulls the non-headless build).
+# fonts-thai-tlwg + libfribidi0: render Thai text (synthetic demo labels; Pillow raqm layout).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git libgl1 libglib2.0-0 \
+ && apt-get install -y --no-install-recommends git libgl1 libglib2.0-0 fonts-thai-tlwg libfribidi0 \
  && rm -rf /var/lib/apt/lists/* \
  && git config --system --add safe.directory '*'
 WORKDIR /app
@@ -68,3 +69,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ENV PARCEL_OCR_PADDLEOCR_HOME=/opt/PaddleOCR \
     PADDLE_PDX_CACHE_HOME=/app/artifacts/.paddlex
 CMD ["parcel-ocr", "--help"]
+
+# ---------------------------------------------------------------- notebook (train + JupyterLab)
+FROM train AS notebook
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --python /opt/venv/bin/python jupyterlab==4.6.* ipywidgets==8.1.* matplotlib==3.11.*
+EXPOSE 8888
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--ServerApp.root_dir=/app"]

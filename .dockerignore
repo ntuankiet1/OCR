@@ -11,3 +11,5 @@ mlruns/
 docs/
 *.pdf
 .DS_Store
+.workspace/
+notebooks/

@@ -72,6 +72,29 @@ def ingest(path: Path) -> None:
     _echo(stats.__dict__)
 
 
+@app.command("ingest-labels")
+def ingest_labels(path: Path) -> None:
+    """Ingest annotation exports (JSONL of LabelRecord: annotator / adjudicated / synthetic).
+    Images must already be indexed via `ingest`. Officer labels only come from review exports."""
+    from src.data.ingest import ingest_label_records
+
+    _echo(ingest_label_records(path, S.images_index_dir, S.labels_dir))
+
+
+@app.command("demo-data")
+def demo_data(
+    n: Annotated[int, typer.Option(help="number of synthetic jobs")] = 600,
+    batch: Annotated[int, typer.Option(help="batch no.; frozen sets come from batch 1")] = 1,
+    seed: Annotated[int, typer.Option()] = 7,
+    out: Annotated[Path | None, typer.Option(help="default: data/demo/batch-<n>")] = None,
+) -> None:
+    """Generate synthetic parcel jobs (images, review export, gold labels, rosters). Demo only."""
+    from src.data.synthetic import generate
+
+    out = out or S.data_dir / "demo" / f"batch-{batch}"
+    _echo(generate(out, S.data_dir / "rosters", n, seed=seed, batch=batch))
+
+
 @app.command()
 def snapshot() -> None:
     """Resolve labels, assign splits and write data/snapshots/current."""
@@ -500,7 +523,8 @@ def retrain(
     if not (state["due"] or force):
         typer.echo("trigger not met — nothing to do")
         return
-    _run(["dvc", "add", str(S.labels_dir), str(S.images_index_dir)])
+    raw = [S.labels_dir, S.images_index_dir, S.data_dir / "rosters"]
+    _run(["dvc", "add", *(str(p) for p in raw if p.exists())])
     evaluate_champion()
     _run(["dvc", "repro"])
     report = json.loads(Path("reports/gate.json").read_text())

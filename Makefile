@@ -4,7 +4,7 @@ RUN          := $(COMPOSE) --profile tools run --rm pipeline
 RUN_TRAIN    := $(COMPOSE) --profile train run --rm train
 GPU_COMPOSE  := $(COMPOSE) -f docker-compose.yml -f docker-compose.gpu.yml
 
-.PHONY: help env build build-train up down test lint init base-models retrain status shell benchmark-thai
+.PHONY: help env build build-train up down test lint init base-models retrain status shell benchmark-thai notebook
 
 help:            ## list targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -43,6 +43,9 @@ retrain:         ## one supervised cycle (trigger → repro → gate → registe
 benchmark-thai: env ## ThaiOCRBench, 4 OCR tasks (LIMIT=20 smoke run; ARGS="--bundle artifacts/bundle")
 	$(COMPOSE) --profile train run --rm --no-deps train \
 		parcel-ocr benchmark-thai $(if $(LIMIT),--limit $(LIMIT)) $(ARGS)
+
+notebook: env    ## JupyterLab (train image) on http://127.0.0.1:8888 — token from NOTEBOOK_TOKEN
+	$(COMPOSE) --profile notebook run --rm --no-deps --service-ports notebook
 
 status:          ## champion / challenger / previous
 	$(RUN) parcel-ocr status

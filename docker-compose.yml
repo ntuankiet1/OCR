@@ -151,10 +151,36 @@ services:
       args:
         TRAIN_VARIANT: ${TRAIN_VARIANT:-cpu}
     image: parcel-ocr/train:${TRAIN_VARIANT:-cpu}
-    platform: linux/amd64
+    platform: ${TRAIN_PLATFORM:-linux/amd64}
     profiles: ["train"]
     shm_size: "8gb"      # paddle / torch dataloader workers
     command: ["parcel-ocr", "--help"]
+
+  # JupyterLab on the train image — notebooks/ (e.g. the ThaiOCRBench notebook).
+  #   make notebook   → http://127.0.0.1:8888/lab?token=$NOTEBOOK_TOKEN
+  notebook:
+    <<: *app
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+      target: notebook
+      args:
+        TRAIN_VARIANT: ${TRAIN_VARIANT:-cpu}
+    image: parcel-ocr/notebook:${TRAIN_VARIANT:-cpu}
+    platform: ${TRAIN_PLATFORM:-linux/amd64}
+    profiles: ["notebook"]
+    shm_size: "8gb"
+    ports:
+      - "127.0.0.1:${NOTEBOOK_PORT:-8888}:8888"
+    command:
+      - jupyter
+      - lab
+      - --ip=0.0.0.0
+      - --port=8888
+      - --no-browser
+      - --allow-root
+      - --ServerApp.root_dir=/app
+      - --IdentityProvider.token=${NOTEBOOK_TOKEN:-parcel-ocr}
 
   test:
     build:

@@ -127,13 +127,15 @@ def train_type_size(params: dict, export_dir: Path, out_dir: Path) -> Path:
 
         model.eval().cpu()
         onnx_path = out_dir / "model.onnx"
+        # Fixed batch of 1 (serving classifies one parcel at a time). torch >= 2.9 exports via
+        # the dynamo exporter by default, which needs `onnxscript` (in the train requirements).
         torch.onnx.export(
             model,
-            torch.randn(1, 3, size, size),
+            (torch.randn(1, 3, size, size),),
             str(onnx_path),
             input_names=["image"],
             output_names=["logits"],
-            dynamic_axes={"image": {0: "batch"}, "logits": {0: "batch"}},
+            dynamo=True,
         )
         mlflow.log_metric("best_val_acc", best_acc)
         mlflow.log_artifact(str(onnx_path))

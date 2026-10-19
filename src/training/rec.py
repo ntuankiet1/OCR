@@ -52,6 +52,11 @@ def train_rec(params: dict, export_dir: Path, out_dir: Path, paddleocr_home: Pat
         urllib.request.urlretrieve(params["pretrained_url"], pretrained)
 
     save_dir = out_dir / "checkpoints"
+    n_train = len(train_gt.read_text(encoding="utf-8").splitlines())
+    # drop_last=True upstream: a batch larger than the data would yield zero batches.
+    batch_size = max(1, min(params["batch_size"], n_train))
+    # Upstream evaluates every 1000 steps; small datasets would never write best_accuracy.
+    steps_per_epoch = max(1, n_train // batch_size)
     overrides = [
         *_o("Global.pretrained_model", str(pretrained.with_suffix(""))),
         *_o("Global.epoch_num", params["epochs"]),
@@ -59,12 +64,13 @@ def train_rec(params: dict, export_dir: Path, out_dir: Path, paddleocr_home: Pat
         *_o("Global.use_gpu", str(params["use_gpu"]).lower()),
         *_o("Global.distributed", "false"),
         *_o("Global.save_epoch_step", max(1, params["epochs"] // 3)),
+        *_o("Global.eval_batch_step", [0, steps_per_epoch]),
         *_o("Optimizer.lr.learning_rate", params["learning_rate"]),
         *_o("Optimizer.lr.warmup_epoch", params["warmup_epochs"]),
         *_o("Train.dataset.data_dir", str(export_dir)),
         *_o("Train.dataset.label_file_list", [str(train_gt)]),
-        *_o("Train.sampler.first_bs", params["batch_size"]),
-        *_o("Train.loader.batch_size_per_card", params["batch_size"]),
+        *_o("Train.sampler.first_bs", batch_size),
+        *_o("Train.loader.batch_size_per_card", batch_size),
         *_o("Train.loader.num_workers", params["num_workers"]),
         *_o("Eval.dataset.data_dir", str(export_dir)),
         *_o("Eval.dataset.label_file_list", [str(val_gt)]),
@@ -82,21 +88,24 @@ def train_rec(params: dict, export_dir: Path, out_dir: Path, paddleocr_home: Pat
             check=True,
         )
         inference_dir = out_dir / "inference"
+        best = save_dir / "best_accuracy"
+        checkpoint = best if best.with_suffix(".pdparams").exists() else save_dir / "latest"
+        mlflow.set_tag("exported_checkpoint", checkpoint.name)
         subprocess.run(
             [
                 sys.executable,
                 "tools/export_model.py",
                 "-c",
                 str(base_cfg),
-                *_o("Global.pretrained_model", str(save_dir / "best_accuracy")),
+                *_o("Global.pretrained_model", str(checkpoint)),
                 *_o("Global.save_inference_dir", str(inference_dir)),
             ],
             cwd=paddleocr_home,
             check=True,
         )
-        best = save_dir / "best_accuracy.states"
-        if best.exists():
-            mlflow.log_artifact(str(best))
+        states = checkpoint.with_suffix(".states")
+        if states.exists():
+            mlflow.log_artifact(str(states))
         (out_dir / "run.json").write_text(
             json.dumps({"mlflow_run_id": run.info.run_id, "oov_chars": oov}, indent=2)
         )

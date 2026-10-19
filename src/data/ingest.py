@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from src.data.labelstore import append_images, append_labels
+from src.data.labelstore import append_images, append_labels, read_images
 from src.schemas import (
     ImageRecord,
     LabelField,
@@ -80,6 +80,36 @@ def event_to_records(event: ReviewEvent) -> tuple[ImageRecord, list[LabelRecord]
             )
         )
     return image, labels
+
+
+ANNOTATION_SOURCES = {LabelSource.ANNOTATOR, LabelSource.ADJUDICATED, LabelSource.SYNTHETIC}
+
+
+def ingest_label_records(path: Path, images_root: Path, labels_root: Path) -> dict:
+    """Annotation exports (Label Studio adjudication, synthetic data). Labels for images that
+    were never indexed are rejected: every label must trace back to a stored image."""
+    known = set(read_images(images_root)["image_sha256"])
+    records, rejected = [], {"unknown_image": 0, "wrong_source": 0, "invalid": 0}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                rec = LabelRecord.model_validate_json(line)
+            except ValueError:
+                rejected["invalid"] += 1
+                continue
+            if rec.source not in ANNOTATION_SOURCES:
+                rejected["wrong_source"] += 1
+            elif rec.image_sha256 not in known:
+                rejected["unknown_image"] += 1
+            else:
+                records.append(rec)
+    append_labels(records, labels_root)
+    by_source: dict[str, int] = {}
+    for r in records:
+        by_source[r.source] = by_source.get(r.source, 0) + 1
+    return {"ingested": len(records), "by_source": by_source, "rejected": rejected}
 
 
 def ingest_jsonl(path: Path, images_root: Path, labels_root: Path) -> IngestStats:

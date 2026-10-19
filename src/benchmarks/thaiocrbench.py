@@ -277,6 +277,25 @@ def write_report(
     return path
 
 
+def save_run(
+    pred: pd.DataFrame, summary: dict, spec: ModelSpec, limit: int | None, out_root: Path
+) -> Path:
+    """Write predictions.parquet, metrics.json and report.md; return the report path."""
+    meta = {
+        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "limit": limit,
+        "dataset": REPO,
+        "revision": REVISION,
+        "models": spec.__dict__ | {"models_dir": str(spec.models_dir)},
+    }
+    label = re.sub(r"[^A-Za-z0-9_.-]+", "_", spec.label)
+    out_dir = out_root / f"{datetime.now(UTC):%Y%m%d-%H%M}-{label}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pred.to_parquet(out_dir / "predictions.parquet", index=False)
+    (out_dir / "metrics.json").write_text(json.dumps(meta | summary, indent=2, ensure_ascii=False))
+    return write_report(out_dir, pred, summary, spec, meta)
+
+
 def benchmark(
     spec: ModelSpec,
     cache_dir: Path,
@@ -295,21 +314,8 @@ def benchmark(
 
     pred = run(engine, df)
     summary = summarize(pred)
-    meta = {
-        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
-        "limit": limit,
-        "dataset": REPO,
-        "revision": REVISION,
-        "models": spec.__dict__ | {"models_dir": str(spec.models_dir)},
-    }
-
-    out_dir = (
-        out_root / f"{datetime.now(UTC):%Y%m%d-%H%M}-{re.sub(r'[^A-Za-z0-9_.-]+', '_', spec.label)}"
-    )
-    out_dir.mkdir(parents=True, exist_ok=True)
-    pred.to_parquet(out_dir / "predictions.parquet", index=False)
-    (out_dir / "metrics.json").write_text(json.dumps(meta | summary, indent=2, ensure_ascii=False))
-    report = write_report(out_dir, pred, summary, spec, meta)
+    report = save_run(pred, summary, spec, limit, out_root)
+    out_dir = report.parent
 
     if log_mlflow:
         import mlflow

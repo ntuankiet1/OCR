@@ -4,11 +4,11 @@
 #   torch:  https://download.pytorch.org/whl/cu126
 --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
 --extra-index-url https://download.pytorch.org/whl/cu126
-paddlepaddle-gpu==3.3.1
+paddlepaddle-gpu==3.2.2
 paddleocr==3.7.0
 torch==2.14.1
 torchvision
 timm==1.0.30
 onnx==1.23.2
 onnxruntime-gpu==1.31.0
-paddle2onnx==2.1.0
+onnxscript==0.7.2

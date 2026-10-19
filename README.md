@@ -29,6 +29,26 @@ make up && make init
 make build-train && make base-models   # one-off, needs internet
 ```
 
+## Run the whole pipeline in a notebook
+
+[notebooks/run_pipeline.ipynb](notebooks/run_pipeline.ipynb) drives the repo end to end on
+synthetic data:
+1. Generate and ingest the data, then freeze the evaluation sets.
+2. Cycle 1: train, calibrate, gate, register.
+3. Promote the challenger and run inference with the champion.
+4. Cycle 2: retrain and gate against the champion.
+5. Roll back, then inspect lineage.
+
+It runs in an isolated copy of the repo with a local DVC remote and a local MLflow database (SQLite).
+
+- On-prem: `make notebook`, then open http://127.0.0.1:8888.
+- Colab: pick a T4 GPU runtime and run all cells. The notebook clones the repo from GitHub and
+  installs the CUDA build of PaddlePaddle.
+
+Synthetic jobs come from `parcel-ocr demo-data`: rendered Thai labels with Code128 barcodes,
+resident rosters, a review export and two-reviewer gold labels. Annotation exports go in with
+`parcel-ocr ingest-labels`.
+
 ## The retraining loop
 
 ```
@@ -69,6 +89,11 @@ make benchmark-thai ARGS="--bundle artifacts/bundle --mlflow"   # a fine-tuned b
 
 Output: `reports/benchmarks/thaiocrbench/<run>/report.md`, `metrics.json` and
 `predictions.parquet` (each sample's answer, prediction and scores).
+
+Interactive version with sample images, worst cases and character-error tables:
+[notebooks/benchmark_thaiocrbench.ipynb](notebooks/benchmark_thaiocrbench.ipynb). Run it with
+`make notebook` (JupyterLab on http://127.0.0.1:8888, token `NOTEBOOK_TOKEN`) or on Colab, since it
+touches only public data and models.
 
 This is general Thai text, not parcel labels: use it to choose between off-the-shelf models and
 to catch **forgetting** after fine-tuning on parcels. It is not an acceptance test.
