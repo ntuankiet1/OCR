@@ -21,6 +21,7 @@ Run:
 import argparse
 import json
 import re
+import sys
 import time
 import unicodedata
 import urllib.request
@@ -30,7 +31,6 @@ import cv2
 import numpy as np
 import paddle
 import pandas as pd
-from paddleocr import PaddleOCR, TextRecognition
 from rapidfuzz.distance import Levenshtein
 
 REPO = "typhoon-ai/ThaiOCRBench"
@@ -87,7 +87,21 @@ def crop_box(image: np.ndarray, question: str) -> np.ndarray:
 
 
 # --------------------------------------------------------------------------- 2. model
+def hide_broken_torch() -> None:
+    """paddleocr imports paddlex → modelscope, whose logger imports torch whenever it is
+    installed. On Colab, installing paddlepaddle-gpu replaces CUDA libraries (NCCL) that the
+    preinstalled torch needs, so `import torch` fails ("undefined symbol ..."). This script
+    never uses torch: if it cannot be imported, make it look absent (modelscope skips it)."""
+    try:
+        import torch  # noqa: F401
+    except (ImportError, OSError):  # OSError: a CUDA library file is missing
+        sys.modules["torch"] = None  # importlib.util.find_spec("torch") now returns None
+
+
 def load_model(device: str):
+    hide_broken_torch()
+    from paddleocr import PaddleOCR, TextRecognition
+
     print(f"loading {DET_MODEL} + {REC_MODEL} on {device} (paddle {paddle.__version__})")
     common = {
         "device": device,

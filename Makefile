@@ -4,6 +4,12 @@ RUN          := $(COMPOSE) --profile tools run --rm pipeline
 RUN_TRAIN    := $(COMPOSE) --profile train run --rm train
 GPU_COMPOSE  := $(COMPOSE) -f docker-compose.yml -f docker-compose.gpu.yml
 
+# Train/notebook images build for the host architecture: Apple Silicon → linux/arm64 (native,
+# no x86 emulation), x86 servers → linux/amd64. Override: make notebook TRAIN_PLATFORM=linux/amd64
+HOST_ARCH      := $(shell uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
+TRAIN_PLATFORM ?= linux/$(HOST_ARCH)
+export TRAIN_PLATFORM
+
 .PHONY: help env build build-train up down test lint init base-models retrain status shell benchmark-thai notebook
 
 help:            ## list targets
@@ -16,7 +22,7 @@ build: env       ## build core + test + mlflow images
 	$(COMPOSE) build init mlflow
 	$(COMPOSE) --profile test build test
 
-build-train: env ## build the training image (linux/amd64; slow under emulation on Apple Silicon)
+build-train: env ## build the training image (host architecture, see TRAIN_PLATFORM)
 	$(COMPOSE) --profile train build train
 
 up: env          ## start infra: postgres, seaweedfs, mlflow, label-studio
