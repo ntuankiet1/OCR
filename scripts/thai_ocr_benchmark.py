@@ -98,25 +98,33 @@ def hide_broken_torch() -> None:
         sys.modules["torch"] = None  # importlib.util.find_spec("torch") now returns None
 
 
-def load_model(device: str):
+def load_model(device: str, det_name: str, rec_name: str, rec_dir: Path | None):
+    """rec_dir: a fine-tuned recognizer exported by train_thai_rec.py (None = Paddle's model).
+    rec_name must be the architecture it was trained from (e.g. PP-OCRv5_server_rec)."""
     hide_broken_torch()
     from paddleocr import PaddleOCR, TextRecognition
 
-    print(f"loading {DET_MODEL} + {REC_MODEL} on {device} (paddle {paddle.__version__})")
+    source = rec_dir or "official weights"
+    print(f"loading {det_name} + {rec_name} ({source}) on {device} (paddle {paddle.__version__})")
     common = {
         "device": device,
         # paddle 3.3.x crashes on CPU with oneDNN ("ConvertPirAttribute2RuntimeAttribute")
         "enable_mkldnn": device == "cpu" and not paddle.__version__.startswith("3.3"),
     }
+    rec_dir_kw = {"text_recognition_model_dir": str(rec_dir)} if rec_dir else {}
     ocr = PaddleOCR(
-        text_detection_model_name=DET_MODEL,
-        text_recognition_model_name=REC_MODEL,
+        text_detection_model_name=det_name,
+        text_recognition_model_name=rec_name,
         use_doc_orientation_classify=False,
         use_doc_unwarping=False,
         use_textline_orientation=True,
+        **rec_dir_kw,
         **common,
     )
-    rec_only = TextRecognition(model_name=REC_MODEL, **common)  # for crops with no detected text
+    # For crops where the detector finds no text.
+    rec_only = TextRecognition(
+        model_name=rec_name, **({"model_dir": str(rec_dir)} if rec_dir else {}), **common
+    )
     return ocr, rec_only
 
 
@@ -162,14 +170,24 @@ def main() -> None:
     parser.add_argument("--device", help="gpu:0 or cpu (default: GPU if available)")
     parser.add_argument("--out", type=Path, default=Path("benchmark_results"))
     parser.add_argument("--cache", type=Path, default=Path.home() / ".cache" / "thaiocrbench")
+    parser.add_argument("--det-name", default=DET_MODEL, help="e.g. PP-OCRv5_server_det")
+    parser.add_argument("--rec-name", default=REC_MODEL, help="architecture of the recognizer")
+    parser.add_argument("--rec-dir", type=Path, help="fine-tuned recognizer (exported folder)")
+    parser.add_argument(
+        "--tasks", nargs="+", choices=TASKS, help="subset of tasks (default: all 4)"
+    )
+    parser.add_argument("--tag", help="results go to <out>/<tag> (e.g. baseline, mobile-finetuned)")
     args = parser.parse_args()
+    out = args.out / args.tag if args.tag else args.out
 
     has_gpu = paddle.device.is_compiled_with_cuda() and paddle.device.cuda.device_count() > 0
     device = args.device or ("gpu:0" if has_gpu else "cpu")
 
     df = load_benchmark(args.cache, args.limit)
+    if args.tasks:
+        df = df[df["Task"].isin(args.tasks)].reset_index(drop=True)
     print(f"{len(df)} images: {df['Task'].value_counts().to_dict()}")
-    ocr, rec_only = load_model(device)
+    ocr, rec_only = load_model(device, args.det_name, args.rec_name, args.rec_dir)
 
     rows = []
     start = time.perf_counter()
@@ -207,21 +225,22 @@ def main() -> None:
     )
     print("\n" + summary.round(3).to_string())
 
-    args.out.mkdir(parents=True, exist_ok=True)
-    results.to_csv(args.out / "predictions.csv", index=False)
+    out.mkdir(parents=True, exist_ok=True)
+    results.to_csv(out / "predictions.csv", index=False)
     meta = {
         "dataset": REPO,
         "revision": REVISION,
-        "det": DET_MODEL,
-        "rec": REC_MODEL,
+        "det": args.det_name,
+        "rec": args.rec_name,
+        "rec_dir": str(args.rec_dir) if args.rec_dir else None,
         "device": device,
         "paddle": paddle.__version__,
         "limit": args.limit,
     }
-    (args.out / "summary.json").write_text(
+    (out / "summary.json").write_text(
         json.dumps({**meta, "tasks": summary.round(4).to_dict(orient="index")}, indent=2)
     )
-    print(f"\nsaved {args.out / 'predictions.csv'} and {args.out / 'summary.json'}")
+    print(f"\nsaved {out / 'predictions.csv'} and {out / 'summary.json'}")
 
 
 if __name__ == "__main__":

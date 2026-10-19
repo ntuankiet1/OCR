@@ -1,139 +1,140 @@
-# Smartworld Parcel OCR — training pipeline
+# Smartworld Parcel OCR
 
-Supervised, versioned retraining for the parcel-label OCR described in the business requirements
-document (BRD v1.6 — not in this repo; place it under `docs/` locally, `docs/*.pdf` is git-ignored).
-Section references such as "BRD §9" or "AC01" in the code point to that document.
-Everything runs on-prem in Docker; no image or text is sent to an external AI service.
+OCR for parcel labels in Thai condominiums. A label photo goes in; the recipient, unit, tracking
+number and carrier come out, and uncertain cases go to an officer for review. Everything runs
+on-prem with **plain vision OCR models** (PaddleOCR PP-OCR): no vision-language models, no
+external AI services.
 
-## Stack
+The business requirements document (BRD v1.6) is not in this repo; put it under `docs/` locally
+(`docs/*.pdf` is git-ignored). References like "BRD §9" or "AC01" in the code point to it.
 
-| Concern | Tool | Where |
-|---|---|---|
-| Object storage (images, DVC remote, MLflow artifacts) | SeaweedFS (S3 API) | `seaweedfs` service |
-| Data versioning | DVC (`dvc.yaml`, `dvc.lock`) | `pipeline` / `train` images |
-| Experiments + model registry | MLflow 3 (Postgres backend) | `mlflow` service, :5000 |
-| Annotation / adjudication | Label Studio | `label-studio` service, :8080 |
-| OCR | PaddleOCR 3.x — PP-OCRv5 mobile det + `th_PP-OCRv5_mobile_rec` | `train` image |
-| Type/size classifier | timm MobileNetV3 → ONNX | `train` image |
+---
 
-Images: `core` (data, calibration, evaluation, gate, registry — multi-arch), `test`, and
-`train` (adds Paddle + PyTorch; `linux/amd64` only because Paddle has no Linux arm64 wheels).
+## Start here: the 3 scripts used right now
 
-## Quick start
+The `scripts/` folder holds standalone tools. They don't need anything else from this repo, so
+each one runs as is on Kaggle, Colab or in Docker.
 
-```bash
-make env          # .env from template — change the secrets
-make build        # core, test, mlflow images
-make test         # test suite in a container
-make up && make init
-make build-train && make base-models   # one-off, needs internet
-```
+| Script | What it does |
+|---|---|
+| [scripts/thai_ocr_benchmark.py](scripts/thai_ocr_benchmark.py) | Measures an OCR model on [ThaiOCRBench](https://huggingface.co/datasets/typhoon-ai/ThaiOCRBench) (public Thai benchmark, 945 images, 4 reading tasks). Prints exact match, CER, similarity per task and saves `predictions.csv` + `summary.json`. |
+| [scripts/make_thai_rec_data.py](scripts/make_thai_rec_data.py) | Generates synthetic Thai + English **text lines that look like parcel labels** (names, units, addresses, phones, tracking numbers, carriers) in looped and loopless fonts, and **evaluates the dataset against our requirements** (`report.json`, `samples.jpg`). |
+| [scripts/train_thai_rec.py](scripts/train_thai_rec.py) | Trains the text recognizer with PaddleOCR: `--model mobile` fine-tunes `th_PP-OCRv5_mobile_rec`; `--model server` trains the bigger `PP-OCRv5_server_rec` architecture with the Thai dictionary. Exports the model and scores it on fonts it never saw. |
 
-## Run the whole pipeline in a notebook
-
-[notebooks/run_pipeline.ipynb](notebooks/run_pipeline.ipynb) drives the repo end to end on
-synthetic data:
-1. Generate and ingest the data, then freeze the evaluation sets.
-2. Cycle 1: train, calibrate, gate, register.
-3. Promote the challenger and run inference with the champion.
-4. Cycle 2: retrain and gate against the champion.
-5. Roll back, then inspect lineage.
-
-It runs in an isolated copy of the repo with a local DVC remote and a local MLflow database (SQLite).
-
-- On-prem: `make notebook`, then open http://127.0.0.1:8888.
-- Colab: pick a T4 GPU runtime and run all cells. The notebook clones the repo from GitHub and
-  installs the CUDA build of PaddlePaddle.
-
-Synthetic jobs come from `parcel-ocr demo-data`: rendered Thai labels with Code128 barcodes,
-resident rosters, a review export and two-reviewer gold labels. Annotation exports go in with
-`parcel-ocr ingest-labels`.
-
-## The retraining loop
-
-```
-review exports (JSONL) ──► parcel-ocr ingest ──► data/labels, data/images_index (append-only, dvc add)
-                                                        │
-parcel-ocr retrain:  trigger? ─► evaluate-champion ─► dvc repro ─► gate ─► register (alias: challenger)
-                                                                                 │ shadow mode
-                                         parcel-ocr promote <v> --approved-by <name>   (alias: champion)
-                                         parcel-ocr rollback --reason ... --by ...     (back to previous)
-```
-
-`dvc repro` stages: snapshot → export → train_rec / train_type_size → assemble_provisional →
-predict_calibration → calibrate → assemble → predict_regression → evaluate → gate.
-
-**Trigger** (`params.yaml: trigger`): ≥1,000 new human-verified labels, or 7 days with new labels.
-
-**Gate** (`params.yaml: gate`): any wrong unit/recipient assignment blocks; no field may drop
-more than 0.2 pp or be significantly worse (paired McNemar); no carrier/capture-mode/property
-subgroup may drop more than 1 pp; auto rate and p95 latency must hold.
-
-**Promotion is always manual** — a named approver after the shadow period.
-
-## Public Thai benchmark (ThaiOCRBench)
-
-Paddle publishes no public Thai benchmark (its Thai numbers come from in-house sets), so we use
-[ThaiOCRBench](https://huggingface.co/datasets/typhoon-ai/ThaiOCRBench) (IJCNLP-AACL 2025,
-CC-BY-SA-4.0, revision pinned in `src/benchmarks/thaiocrbench.py`). An OCR pipeline can answer 4
-of its 13 tasks: fine-grained text recognition (text inside a given box), text recognition,
-full-page OCR, and handwritten content extraction. Scores use the benchmark's own metrics
-(BMFL / ANLS, re-implemented from its eval code) plus our CER and exact match.
+### Train and compare on Kaggle or Colab (GPU)
 
 ```bash
-make build-train
-make benchmark-thai LIMIT=20                       # smoke run, 20 samples per task
-make benchmark-thai                                # full run, ~945 images
-make benchmark-thai ARGS="--bundle artifacts/bundle --mlflow"   # a fine-tuned bundle, logged
+# GPU runtime (Kaggle: Accelerator "GPU T4", Internet on; Colab: T4)
+apt-get -qq install -y libraqm0 libfribidi0 fonts-thai-tlwg      # correct Thai text rendering
+pip uninstall -y -q paddlepaddle                                  # never keep the CPU build
+pip install -q paddlepaddle-gpu==3.2.2 --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
+pip install -q paddleocr==3.7.0 pythainlp fonttools rapidfuzz
+git clone -q https://github.com/ntuankiet1/OCR.git
+git clone -q --depth 1 --branch v3.7.0 https://github.com/PaddlePaddle/PaddleOCR
+pip install -q -r PaddleOCR/requirements.txt
+cd OCR
+
+python scripts/make_thai_rec_data.py --out ../thai_rec_synth --n 200000          # data + fit report
+python scripts/train_thai_rec.py --model mobile --data ../thai_rec_synth --paddleocr ../PaddleOCR
+python scripts/train_thai_rec.py --model server --data ../thai_rec_synth --paddleocr ../PaddleOCR
+
+# before vs after, on the ThaiOCRBench box-reading task
+python scripts/thai_ocr_benchmark.py --tasks "Fine-grained text recognition" --tag baseline
+python scripts/thai_ocr_benchmark.py --tasks "Fine-grained text recognition" --tag mobile \
+    --rec-dir rec_runs/mobile/inference
+python scripts/thai_ocr_benchmark.py --tasks "Fine-grained text recognition" --tag server \
+    --rec-name PP-OCRv5_server_rec --rec-dir rec_runs/server/inference
 ```
 
-Output: `reports/benchmarks/thaiocrbench/<run>/report.md`, `metrics.json` and
-`predictions.parquet` (each sample's answer, prediction and scores).
+Baseline (current model, full benchmark): 20% exact match on box reading. The main failure is
+**loopless Thai fonts read as Latin letters**, which is what the synthetic data targets.
 
-Interactive version with sample images, worst cases and character-error tables:
-[notebooks/benchmark_thaiocrbench.ipynb](notebooks/benchmark_thaiocrbench.ipynb). Run it with
-`make notebook` (JupyterLab on http://127.0.0.1:8888, token `NOTEBOOK_TOKEN`) or on Colab, since it
-touches only public data and models.
+---
 
-This is general Thai text, not parcel labels: use it to choose between off-the-shelf models and
-to catch **forgetting** after fine-tuning on parcels. It is not an acceptance test.
-
-## Data rules that the code enforces
-
-- **Auto-registered jobs are never training labels.** No human checked them. Only officer
-  edits/confirmations, annotator, audit and adjudicated labels count.
-- **Frozen sets** (`data/frozen/regression.txt`, `data/frozen/acceptance.txt`, in git) are
-  immutable, disjoint, and scored only with two-reviewer (`adjudicated`) labels. Export for
-  training refuses them; prediction on `acceptance` needs `--allow-acceptance` (UAT only).
-- **Splits are a salted hash of `group_key`** (property + tracking number), so retakes of one
-  parcel never straddle train and test, and a parcel keeps its split across snapshots.
-- **Calibrated thresholds**: a field is auto-accepted only above a score whose calibration subset
-  has a Clopper-Pearson lower bound ≥ 99.5% (BR05). No threshold → that field always goes to review.
-
-## Bundle = the unit of versioning
-
-`artifacts/bundle/` holds every model, the calibration, `pipeline.json` (runtime params) and the
-rule files, with a content-hash `bundle_id` stamped on every job (BR16). `verify_bundle()` detects
-any modified file. Serving loads `models:/parcel-ocr-bundle@champion`.
-
-## Review-service export contract
-
-One JSON object per line — see `ReviewEvent` in [src/schemas.py](src/schemas.py). `predicted` is
-what the bundle produced, `final` is what was saved after review. `final` must carry the
-**printed text** for edited fields (not only the chosen resident), otherwise the recognizer
-cannot learn from the correction.
-
-## Layout
+## How the OCR works (plain vision, PP-OCR)
 
 ```
-src/            package (imported as `src.*`), CLI entry point `parcel-ocr` → src/cli.py
-  data/         ingest, append-only label store, splits, snapshots, exports
-  training/     PaddleOCR rec fine-tune, type/size classifier, base-model download
-  calibration/  threshold selection, temperature / isotonic calibration
-  evaluation/   metrics, evaluate, gate, predict
-  registry/     bundle assembly + integrity, MLflow register / promote / rollback
-  inference/    quality, barcode, OCR adapter, rule KIE, roster matching, decision rules
-configs/        carriers.yaml (rule KIE), type_size.yaml (BRD classes 1-10)
-docker/         Dockerfiles, training requirements (cpu/gpu), postgres init
-docs/           BRD, decisions.md
+label photo
+ → text detector   PP-OCRv5_server_det / mobile_det   finds text lines (box + score)
+ → recognizer      th_PP-OCRv5_mobile_rec → fine-tuned   reads each line (text + confidence)
+ → barcode reader  zxing-cpp                            tracking number from the barcode
+ → field rules     recipient / unit / tracking / carrier, then match against the resident roster
+ → decision        auto-register only when every check passes, otherwise officer review
 ```
+
+Later: a **layout detector** (PP-DocLayout / PicoDet, trained on our labels) to find the
+recipient and sender blocks before reading. This is the PP-Structure approach with our own
+classes.
+
+| Name | What it is |
+|---|---|
+| PaddlePaddle | Baidu's deep-learning framework (like PyTorch) |
+| PaddleOCR | Baidu's OCR toolkit built on it; we use version 3.7.0 |
+| PP-OCR | PaddleOCR's plain OCR system: detector + recognizer, pure vision |
+| PP-Structure | Document parsing on top of PP-OCR (layout, tables); its layout method is reused later |
+
+---
+
+## Project skeleton
+
+```
+scripts/                 ★ standalone tools used now (benchmark, data, training)
+notebooks/               Jupyter versions (benchmark with images; full-pipeline demo)
+
+src/                     the production pipeline package, imported as `src.*`
+├── cli.py               the `parcel-ocr` command (every pipeline step is a subcommand)
+├── schemas.py           data contracts: label fields, label sources, review-export format
+├── settings.py          paths and settings (env vars PARCEL_OCR_*)
+├── inference/           runs on one label photo: quality → barcode → OCR → fields → match → decision
+├── data/                ingest review exports → append-only label store → snapshots + splits → exports
+├── training/            recognizer + type/size classifier training (used by dvc.yaml)
+├── calibration/         turns model scores into proven auto-accept thresholds (BR05)
+├── evaluation/          metrics, evaluation, champion-vs-challenger gate
+├── registry/            "bundle" (a versioned set of models + thresholds) and MLflow promote/rollback
+├── benchmarks/          ThaiOCRBench with its official metrics (CLI version of the script)
+└── text/                Thai text normalization used when comparing text
+
+configs/                 carriers.yaml (carrier rules), type_size.yaml (parcel size classes 1-10)
+dvc.yaml, params.yaml    the retraining pipeline (stages) and its parameters
+docker/, docker-compose.yml, Makefile   on-prem stack: Postgres, SeaweedFS (S3), MLflow, Label Studio
+tests/                   unit tests (run in Docker: `make test`)
+docs/decisions.md        decisions taken and still open
+```
+
+**Now vs later.** For the demo only `scripts/` matters. `src/` with DVC, MLflow and the gate is
+the supervised retraining pipeline for production: it needs real labelled data from the pilot
+and is described below.
+
+---
+
+## The retraining pipeline (production, later)
+
+```
+review exports ──► parcel-ocr ingest ──► versioned data (DVC)
+parcel-ocr retrain: dvc repro (snapshot → train → calibrate → bundle → evaluate → gate)
+                    ──► register as "challenger" ──► shadow mode
+parcel-ocr promote <version> --approved-by <name>     (human sign-off → "champion")
+parcel-ocr rollback --reason ... --by ...             (back to the previous champion)
+```
+
+Rules the code enforces:
+- Auto-registered jobs are never used as training labels; only human-checked labels are.
+- The regression and acceptance test sets are frozen, never trained on, and scored only with
+  two-reviewer labels.
+- Splits are grouped by parcel (property + tracking number), so retakes never leak into tests.
+- A field is auto-accepted only above a threshold proven on calibration data (BR05).
+- Any wrong unit/recipient assignment blocks a new model (BRD §9, AC03).
+
+On-prem stack: `make env && make build && make test`, then `make up && make init`.
+`make notebook` opens JupyterLab with the full-pipeline demo
+([notebooks/run_pipeline.ipynb](notebooks/run_pipeline.ipynb)) on synthetic data.
+
+---
+
+## Status
+
+| Part | State |
+|---|---|
+| `scripts/thai_ocr_benchmark.py` | Run on Kaggle/Colab GPU (full benchmark) and in Docker |
+| `scripts/make_thai_rec_data.py`, `scripts/train_thai_rec.py` | Smoke-tested in Docker on CPU (tiny data, 1 epoch) |
+| `src/` pipeline | Unit tests 52/53 pass (1 registry test to fix); not yet run end to end |

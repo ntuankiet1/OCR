@@ -19,7 +19,9 @@ import yaml
 
 
 def _o(key: str, value) -> list[str]:
-    return ["-o", f"{key}={json.dumps(value) if isinstance(value, list) else value}"]
+    """One key=value. PaddleOCR's `-o` is argparse nargs="+": a repeated `-o` REPLACES the
+    previous one, so callers put a single "-o" before all pairs."""
+    return [f"{key}={json.dumps(value) if isinstance(value, list) else value}"]
 
 
 def check_charset(gt_files: list[Path], dict_path: Path) -> dict[str, int]:
@@ -83,7 +85,7 @@ def train_rec(params: dict, export_dir: Path, out_dir: Path, paddleocr_home: Pat
         mlflow.log_dict({"oov_chars": oov}, "oov_chars.json")
         # cwd = PaddleOCR repo: the upstream config uses repo-relative paths (dictionary).
         subprocess.run(
-            [sys.executable, "tools/train.py", "-c", str(base_cfg), *overrides],
+            [sys.executable, "tools/train.py", "-c", str(base_cfg), "-o", *overrides],
             cwd=paddleocr_home,
             check=True,
         )
@@ -97,6 +99,7 @@ def train_rec(params: dict, export_dir: Path, out_dir: Path, paddleocr_home: Pat
                 "tools/export_model.py",
                 "-c",
                 str(base_cfg),
+                "-o",
                 *_o("Global.pretrained_model", str(checkpoint)),
                 *_o("Global.save_inference_dir", str(inference_dir)),
             ],
