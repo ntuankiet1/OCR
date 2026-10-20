@@ -1,6 +1,0 @@
-[core]
-    remote = storage
-    autostage = true
-['remote "storage"']
-    url = s3://dvc-store
-    endpointurl = http://seaweedfs:8333

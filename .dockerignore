@@ -5,11 +5,8 @@
 .pytest_cache
 .ruff_cache
 data/
-artifacts/
-reports/
-mlruns/
 docs/
 *.pdf
-.DS_Store
 .workspace/
-notebooks/
+benchmark_results/
+waybill_det/

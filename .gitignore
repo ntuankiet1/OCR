@@ -1,42 +1,18 @@
-# Python
 __pycache__/
 *.py[cod]
 .venv/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
-
-# Environment
 .env
-
-# Data and artifacts are versioned by DVC, not git. DVC adds each output to a .gitignore next
-# to it; the patterns below only cover what exists before the first `dvc add` / `dvc repro`.
-# Git does track: data/frozen/ (frozen split lists), *.dvc pointers, dvc.lock, and the
-# cache:false metrics (snapshot stats, challenger metrics, gate report) for lineage.
-/data/labels/
-/data/images_index/
-/data/rosters/
-/data/images/
-/data/exports/
-/data/demo/
-/data/benchmarks/
-/artifacts/*
-!/artifacts/*.dvc
-!/artifacts/.gitignore
-/reports/champion/
-/reports/benchmarks/
-mlruns/
-
-# OS / editors
 .DS_Store
 .idea/
 .vscode/
-
-# Client documents (BRD) stay local — the repo is public.
-/docs/*.pdf
-
-# Notebook demo workspaces (notebooks/run_pipeline.ipynb)
 /.workspace/
-
-# Output of scripts/thai_ocr_benchmark.py
+# Client documents stay local; the repo is public.
+/docs/*.pdf
+/data/
+/artifacts/
+# Script outputs
 /benchmark_results/
+/waybill_det/
