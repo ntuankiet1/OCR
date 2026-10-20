@@ -16,3 +16,6 @@ __pycache__/
 # Script outputs
 /benchmark_results/
 /waybill_det/
+/models/*
+!/models/README.md
+/samples/

@@ -14,7 +14,7 @@ photo → find waybill → straighten → orientation → OCR (server_det + th_P
 ```bash
 make build          # PADDLE=gpu make build  for CUDA (also set OCR_DEVICE=gpu:0 in .env)
 make up             # http://localhost:8000  (interactive docs at /docs)
-curl -F image=@image.png http://localhost:8000/ocr
+curl -F image=@samples/kex-label.png http://localhost:8000/ocr
 ```
 
 `POST /ocr` (multipart field `image`) returns `waybill` (found + corners), `lines`
@@ -22,19 +22,35 @@ curl -F image=@image.png http://localhost:8000/ocr
 loaded models. Settings (device, models, a fine-tuned recognizer dir, thresholds) are env vars,
 see [.env.example](.env.example). Models are baked into the image, so it runs offline.
 
+## Speed (CPU, Apple-silicon Docker, 12 cores, measured through `POST /ocr`)
+
+| Engine | KEX label (392×522) | DHL photo (1337×955 crop) |
+|---|---|---|
+| `OCR_ENGINE=paddle` | 2.6 s | 9.5 s |
+| `OCR_ENGINE=onnxruntime` (image default) | 0.6 s | 2.0 s |
+
+The ONNX models are converted from the same Paddle models at build time (`paddle2onnx`); the
+recognized text is identical. The waybill detector adds ~30 ms. Re-measure on the real server:
+Paddle's oneDNN path can do better on x86, and on GPU use `OCR_ENGINE=paddle`.
+
 ## Layout
 
 ```
 src/
 ├── api.py        FastAPI app (/health, /ocr)
-├── pipeline.py   locate → OCR → barcodes
-├── locate.py     find the waybill quad and flatten it (OpenCV now; trained detector later)
-├── barcode.py    zxing-cpp
-├── config.py     env settings
+├── pipeline.py   OcrPipeline: locate → OCR → barcodes
+├── locate.py     LabelLocator: crop to the detected label, find its corners, flatten it
+├── detector.py   ShippingLabelDetector (YOLO, ONNX Runtime)
+├── ocr.py        TextReader (PaddleOCR PP-OCRv5; Paddle or ONNX engine)
+├── barcode.py    BarcodeReader (zxing-cpp)
+├── utils.py      shared helpers (pick_providers: CUDA / CoreML / CPU, resize_max_side)
+├── config.py     Settings (pydantic-settings, env vars OCR_*)
 └── schemas.py    response models
 scripts/
 ├── train_waybill_detector.py   download Roboflow datasets, EDA, train a nano YOLO (one class)
 └── thai_ocr_benchmark.py       measure an OCR model on ThaiOCRBench (Kaggle/Colab/Docker)
+models/                          shipping-label-detector.{onnx,pt} (not committed, see models/README.md)
+samples/                         local test images (not committed)
 tests/                           make test
 ```
 

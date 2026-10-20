@@ -1,0 +1,44 @@
+# Demo stack: Parcel web + Parcel API + this OCR service, wired together.
+# Assumes the Parcel repo is next to this one (../Parcel).
+#   docker compose -f docker-compose.demo.yml up -d --build
+#   web  http://localhost:3000/register   (officer app)
+#   api  http://localhost:8000            (Parcel backend)
+#   ocr  http://localhost:8001/docs       (this service; Parcel calls it as http://ocr:8000)
+#   steps http://localhost:8001/debug     (upload a photo, see every pipeline step)
+name: tma-demo
+
+services:
+  ocr:
+    build: .
+    environment:
+      OCR_DETECTOR: /models/shipping-label-detector.onnx
+      OCR_ENABLE_DEBUG: "true"   # serves http://localhost:8001/debug
+    volumes:
+      - ./models:/models:ro
+    ports:
+      - "8001:8000"
+
+  api:
+    build: ../Parcel/backend
+    depends_on:
+      - ocr
+    environment:
+      OCR_URL: http://ocr:8000
+      CORS_ORIGINS: '["http://localhost:3000"]'
+    volumes:
+      - demo-data:/data
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: ../Parcel/web
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
+volumes:
+  demo-data:

@@ -8,6 +8,10 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      OCR_DETECTOR: /models/shipping-label-detector.onnx   # ignored when the file is missing
+    volumes:
+      - ./models:/models:ro
     ports:
       - "${OCR_PORT:-8000}:8000"
     restart: unless-stopped

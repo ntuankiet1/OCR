@@ -1,0 +1,52 @@
+# Rules for reading the fields of a shipping label from OCR text (regex/anchor based, v1).
+# Written from the one Thai label we have (KEX) plus carrier names; extend with real labels.
+# Do not guess tracking formats: a wrong pattern quietly routes good labels to review or accepts
+# a wrong number. Carriers without a pattern are found by keyword only.
+version: rules-1
+
+carriers:
+  kex:
+    display: KEX
+    keywords: ["kex", "kerry express", "kerry", "เคอรี่"]
+    tracking_patterns: ['KEX\d{8,14}']
+  thailand_post:
+    display: Thailand Post
+    keywords: ["ไปรษณีย์ไทย", "thailand post", "thaipost"]
+    tracking_patterns: ['[A-Z]{2}\d{9}TH']
+  flash:
+    display: Flash Express
+    keywords: ["flash express", "แฟลช"]
+  jt:
+    display: J&T Express
+    keywords: ["j&t", "j&t express"]
+  spx:
+    display: SPX
+    keywords: ["spx", "shopee express"]
+  lex:
+    display: LEX
+    keywords: ["lazada express"]
+  ninjavan:
+    display: Ninja Van
+    keywords: ["ninja van", "ninjavan"]
+  dhl:
+    display: DHL
+    keywords: ["dhl"]
+
+# A line that looks like a tracking number when spaces and dashes are removed.
+generic_tracking_pattern: '[A-Z]{2,5}\d{8,15}[A-Z]{0,3}'
+
+# The recipient block starts after one of these; the sender block is never read as the recipient.
+recipient_anchors: ["ผู้รับ", "ชื่อผู้รับ", "ผู้รับสินค้า", "receiver", "recipient", "ship to", "deliver to", "to:"]
+address_anchors: ["ที่อยู่", "ที่อยู่ผู้รับ", "address", "addr"]
+# The address stops at the first line starting with one of these (or after max_address_lines).
+stop_anchors: ["หมายเหตุ", "โทร", "tel", "cw", "wt", "note", "remark", "["]
+max_address_lines: 4
+
+# Form-style labels (DHL Paket): the recipient is a column of handwritten lines under a header, mixed
+# with printed captions. Lines left-aligned with the header (and below it) belong to the block; the
+# first is the name, the rest the address. Captions are skipped, a stop line ends the block.
+column_blocks:
+  anchors: ["empfänger", "empfanger"]
+  caption_keywords: ["adresszusatz", "hausnr", "postleitzahl", "destin", "packstation", "land /", "vor- und", "nachname", "sperrgut"]
+  stop_keywords: ["inklusive", "frankier", "siehe", "aufkleben"]
+  max_lines: 4

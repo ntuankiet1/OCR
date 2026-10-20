@@ -10,3 +10,5 @@ docs/
 .workspace/
 benchmark_results/
 waybill_det/
+models/
+samples/
