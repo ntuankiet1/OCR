@@ -14,8 +14,6 @@ RUN pip install --no-cache-dir "numpy>=2.1" \
 # GPU build: the detector needs the CUDA build of onnxruntime (replaces the CPU one)
 RUN if [ "$PADDLE" = gpu ]; then \
       pip uninstall -y onnxruntime && pip install --no-cache-dir onnxruntime-gpu; fi
-COPY src ./src
-COPY tests ./tests
 # Bake the models into the image so the service runs offline on-prem.
 RUN python -c "from paddleocr import PaddleOCR; PaddleOCR(text_detection_model_name='PP-OCRv5_server_det', text_recognition_model_name='th_PP-OCRv5_mobile_rec', use_doc_orientation_classify=True, use_textline_orientation=True, device='cpu', enable_mkldnn=False)"
 # ONNX copies of the same models: ~4x faster on CPU (OCR_ENGINE=onnxruntime), identical text.
@@ -25,6 +23,9 @@ RUN pip install --no-cache-dir paddle2onnx \
          && paddlex --paddle2onnx --paddle_model_dir /root/.paddlex/official_models/$m --onnx_model_dir /opt/onnx_models/$m; \
        done \
     && pip uninstall -y paddle2onnx
+# Source last: editing it must not redo the (slow) model download and ONNX conversion above.
+COPY src ./src
+COPY tests ./tests
 ENV OCR_DEVICE=cpu OCR_ENGINE=onnxruntime
 EXPOSE 8000
 CMD ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000"]

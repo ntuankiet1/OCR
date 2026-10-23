@@ -92,7 +92,7 @@ class PipelineTracer:
 
         # 3. Crop, 4. straighten
         t0 = time.perf_counter()
-        crop, origin, count = p.locator.crop_to_detection(img)
+        crop, origin, count, detected = p.locator.crop_to_detection(img)
         add(
             "3. Crop to the label",
             f"Best box plus {cfg.crop_pad:.0%} padding: {crop.shape[1]}×{crop.shape[0]} px.",
@@ -100,7 +100,7 @@ class PipelineTracer:
             t0=t0,
         )
         t0 = time.perf_counter()
-        label = p.locator.straighten(crop, origin, count)
+        label = p.locator.straighten(crop, origin, count, detected)
         if label.quad is not None:
             corners = (np.array(label.quad) - np.array(origin)).tolist()
             images = [
@@ -117,9 +117,19 @@ class PipelineTracer:
         add("4. Straighten", note, images, t0=t0)
 
         # 5-8. Orientation, text detection, recognition
-        t0 = time.perf_counter()
-        reading = p.reader.read_detailed(label.image)
-        ocr_ms = int((time.perf_counter() - t0) * 1e3)
+        outcome = p.read_label(img)
+        ocr_ms = outcome.ocr_ms
+        if not outcome.label.detected and outcome.label.quad is not None:
+            quad = np.array(outcome.label.quad, np.int32)
+            placed = draw_polys(img, [quad], GREEN, 2 * _thickness(img))
+            add(
+                "4b. Fallback: the detector found no label",
+                "The whole photo was read. The lines printed on bright paper (dark text on white) "
+                f"place the label (green); {outcome.ignored} line(s) outside it, such as the box's "
+                "own printing, are ignored in the next steps.",
+                [("label placed from the text", placed)],
+            )
+        label, reading = outcome.label, outcome.reading
         add(
             "5. Orientation",
             f"The document-orientation classifier turned the label by {reading.angle}° "
@@ -128,7 +138,7 @@ class PipelineTracer:
         )
         add(
             "6. Text detection",
-            f"The text detector (PP-OCRv5 server) found {len(reading.detected)} text regions.",
+            f"The text detector found {len(reading.detected)} text regions.",
             [("text regions", draw_polys(reading.image, reading.detected, BLUE))],
         )
         kept = p.reader.keep(reading.lines)
@@ -157,17 +167,44 @@ class PipelineTracer:
             {"headers": ["#", "text", "score", "kept", "turned 180°"], "rows": rows},
         )
 
+        rows = p.extractor.merge_rows(kept)
+        merged = [r for r in rows if len(r["parts"]) > 1]
+        if merged:
+            add(
+                "7b. Rows merged",
+                f"The detector cut {sum(len(r['parts']) for r in merged)} pieces of text into "
+                f"{len(merged)} row(s) of one line each (purple) before the field rules read them. "
+                "Pieces on the same row with only a word gap between them are joined; columns, "
+                "which have a wider gutter, stay apart.",
+                [("merged rows", draw_polys(reading.image, [r["box"] for r in merged], PURPLE))],
+                {
+                    "headers": ["merged row", "from pieces"],
+                    "rows": [
+                        [r["text"], " | ".join(kept[k]["text"] for k in r["parts"])] for r in merged
+                    ],
+                },
+            )
+
         # 9. Barcodes
         t0 = time.perf_counter()
         barcodes = p.barcodes.read(label.image)
+        unread = p.barcodes.find_unread(label.image, barcodes, reading.angle)
+        drawn = draw_polys(label.image, [b["box"] for b in barcodes], ORANGE)
+        drawn = draw_polys(drawn, unread, RED)
+        rows = [[b["text"], b["format"]] for b in barcodes]
+        rows += [["(not readable)", "barcode located, could not be decoded"] for _ in unread]
+        note = f"{len(barcodes)} barcode(s) decoded from the straightened label (orange)."
+        if unread:
+            note += (
+                f" {len(unread)} more barcode-like region(s) were located but could not be "
+                "decoded (red): damaged, blurred, tilted too far, or not a valid code. The number "
+                "must be typed in; it is never guessed."
+            )
         add(
             "8. Barcodes",
-            f"{len(barcodes)} barcode(s) decoded from the straightened label (before rotation).",
-            [("barcodes", draw_polys(label.image, [b["box"] for b in barcodes], ORANGE))],
-            {
-                "headers": ["text", "format"],
-                "rows": [[b["text"], b["format"]] for b in barcodes],
-            },
+            note,
+            [("barcodes", drawn)],
+            {"headers": ["text", "format"], "rows": rows},
             t0=t0,
         )
 

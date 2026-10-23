@@ -40,7 +40,7 @@ class TextReader:
             text_recognition_model_name=cfg.rec_model,
             use_doc_orientation_classify=True,
             use_doc_unwarping=cfg.unwarp,
-            use_textline_orientation=True,
+            use_textline_orientation=cfg.textline_orientation,
             device=cfg.device,
             enable_mkldnn=cfg.device == "cpu" and cfg.engine == "paddle" and not self._paddle_33(),
             **kw,

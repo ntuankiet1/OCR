@@ -19,3 +19,7 @@ __pycache__/
 /models/*
 !/models/README.md
 /samples/
+# Real test photos (they can show people); keep them local, the repo is public.
+/test-feedbacks/
+# Internal notes name the real models: never commit (no NDA with the client yet).
+/docs/internal/

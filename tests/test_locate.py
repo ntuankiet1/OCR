@@ -35,3 +35,12 @@ def test_detector_box_is_cropped_and_corners_map_back_to_the_photo():
     # a point at the straightened label's top-left maps back to the label's corner in the photo
     x, y = label.to_photo(np.array([[0, 0]]))[0]
     assert abs(x - quad[0][0]) < 2 and abs(y - quad[0][1]) < 2
+
+
+def test_a_flat_label_is_not_cropped_but_a_photo_of_one_is():
+    flat = np.full((300, 400, 3), 250, np.uint8)
+    cv2.putText(flat, "TO", (20, 60), 0, 2, (0, 0, 0), 3)
+    assert LabelLocator.is_flat_label(flat)
+    assert not LabelLocator.is_flat_label(label_photo())  # a white label on a dark parcel
+    label = LabelLocator(FakeDetector()).locate(flat)
+    assert label.image.shape == flat.shape  # the detector's box was ignored

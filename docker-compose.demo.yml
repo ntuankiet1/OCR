@@ -24,6 +24,7 @@ services:
       - ocr
     environment:
       OCR_URL: http://ocr:8000
+      MIN_FIELD_CONFIDENCE: "0.7"   # below this a field is marked uncertain (Parcel default 0.95)
       CORS_ORIGINS: '["http://localhost:3000"]'
     volumes:
       - demo-data:/data
@@ -35,6 +36,7 @@ services:
       context: ../Parcel/web
       args:
         NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_MIN_FIELD_CONFIDENCE: "0.7"   # keep equal to the API's MIN_FIELD_CONFIDENCE
     depends_on:
       - api
     ports:

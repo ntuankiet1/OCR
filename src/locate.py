@@ -20,6 +20,7 @@ class LocatedLabel:
     quad: list[list[float]] | None  # corners in the photo, None when no corner shape was found
     label_count: int  # how many labels the detector saw (1 when there is no detector)
     inverse: np.ndarray | None = None  # 3x3 matrix: straightened label -> crop
+    detected: bool = False  # True when the detector found the label or the image is itself one
 
     def to_photo(self, points: np.ndarray) -> np.ndarray:
         """Map (N, 2) points from `image` coordinates to photo coordinates."""
@@ -35,36 +36,63 @@ class LabelLocator:
         detector: ShippingLabelDetector | None = None,
         pad: float = 0.03,
         min_area: float = 0.15,
+        flat_labels: bool = True,
     ):
         self.detector = detector
         self.pad = pad  # fraction of the box added around it before cropping
         self.min_area = min_area  # smallest label, as a fraction of the (cropped) image
+        self.flat_labels = flat_labels  # an image that is itself the label is not cropped
 
     def locate(self, img: np.ndarray) -> LocatedLabel:
         """Crop to the detected label, then straighten it when its four corners are found."""
         return self.straighten(*self.crop_to_detection(img))
 
     def straighten(
-        self, crop: np.ndarray, origin: tuple[int, int], label_count: int
+        self, crop: np.ndarray, origin: tuple[int, int], label_count: int, detected: bool = False
     ) -> LocatedLabel:
         quad = self.find_quad(crop)
         if quad is None:
-            return LocatedLabel(crop, origin, None, label_count)
-        matrix, size = self.warp_matrix(quad)
-        flat = cv2.warpPerspective(crop, matrix, size)
-        corners = (quad + np.array(origin, np.float32)).tolist()
-        return LocatedLabel(flat, origin, corners, label_count, np.linalg.inv(matrix))
+            return LocatedLabel(crop, origin, None, label_count, detected=detected)
+        return self.warp_to(crop, quad, label_count, origin, detected)
 
-    def crop_to_detection(self, img: np.ndarray) -> tuple[np.ndarray, tuple[int, int], int]:
-        """Crop to the best detected box: (crop, (x, y) of its top-left in `img`, labels seen)."""
+    def warp_to(
+        self,
+        img: np.ndarray,
+        quad: np.ndarray,
+        label_count: int = 1,
+        origin: tuple[int, int] = (0, 0),
+        detected: bool = True,
+    ) -> LocatedLabel:
+        """Flatten `quad` (corners in `img`)."""
+        matrix, size = self.warp_matrix(quad)
+        flat = cv2.warpPerspective(img, matrix, size)
+        corners = (quad + np.array(origin, np.float32)).tolist()
+        return LocatedLabel(flat, origin, corners, label_count, np.linalg.inv(matrix), detected)
+
+    def crop_to_detection(
+        self, img: np.ndarray
+    ) -> tuple[np.ndarray, tuple[int, int], int, bool]:
+        """Crop to the best detected box: (crop, (x, y) of its top-left in `img`, labels seen,
+        whether the label was actually found: by the detector, or because the image is one)."""
+        if self.flat_labels and self.is_flat_label(img):
+            return img, (0, 0), 1, True
         found = self.detector.detect(img) if self.detector else []
         if not found:
-            return img, (0, 0), 1
+            return img, (0, 0), 1, False
         (bx0, by0, bx1, by1), _ = found[0]
         px, py = self.pad * (bx1 - bx0), self.pad * (by1 - by0)
         x0, y0 = int(max(bx0 - px, 0)), int(max(by0 - py, 0))
         x1, y1 = int(min(bx1 + px, img.shape[1])), int(min(by1 + py, img.shape[0]))
-        return img[y0:y1, x0:x1], (x0, y0), len(found)
+        return img[y0:y1, x0:x1], (x0, y0), len(found), True
+
+    @staticmethod
+    def is_flat_label(img: np.ndarray, min_white: float = 0.5, white: int = 215) -> bool:
+        """True when the image itself is a label (a scan, PDF or screenshot) and not a photo of
+        one: most of it is white paper (flat labels measured 68-85%, photos of parcels near 0%).
+        The detector is trained on photos and would crop such a label short, losing its header
+        and side columns."""
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        return float((gray > white).mean()) >= min_white
 
     def find_quad(self, img: np.ndarray) -> np.ndarray | None:
         h, w = img.shape[:2]

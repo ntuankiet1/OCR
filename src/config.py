@@ -23,19 +23,26 @@ class Settings(BaseSettings):
     rec_model: str = "th_PP-OCRv5_mobile_rec"
     rec_dir: str | None = None  # a fine-tuned recognizer, exported inference dir (engine=paddle)
     unwarp: bool = False  # UVDoc page unwarping, slow
+    # Turn upside-down text lines before reading them. Off: on bold Thai text it flipped upright
+    # lines (SPX, Shopee Food read backwards); the label-level orientation step still runs.
+    textline_orientation: bool = False
 
     # Thresholds, per step. Raise them for fewer false positives, lower them to miss less.
     detector: str | None = None  # path to the shipping-label detector .onnx
     detector_conf: float = 0.25  # label detector: minimum box confidence
     detector_nms_iou: float = 0.5  # label detector: overlap above which boxes are merged
     locator_min_area: float = 0.15  # corner finder: smallest label, as a share of the crop
+    flat_labels: bool = True  # skip the crop when the image is itself a label (mostly white)
+    # Detector found nothing: place the label from the lines printed on bright paper and ignore
+    # text outside it (a box's own printing).
+    fallback_localize: bool = True
     crop_pad: float = 0.03  # share of the detected box added around it before cropping
     text_det_thresh: float | None = None  # text detector pixel threshold (None = Paddle default)
     text_det_box_thresh: float | None = None  # text detector box score (None = Paddle default)
     min_score: float = 0.5  # recognizer: lines scoring below this are dropped
 
     blur_threshold: float = 60.0  # Laplacian variance below this flags BLUR (see quality.py)
-    model_version: str = "tma-ocr-0.1+ppocrv5-th"  # reported to Parcel, with the rules version
+    model_version: str = "tma-ocr-0.1"  # sent to Parcel with the rules version; keep it generic
 
     enable_debug: bool = False  # serve /debug (step-by-step page): shows uploaded images, demo only
 

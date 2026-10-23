@@ -1,9 +1,15 @@
-# Rules for reading the fields of a shipping label from OCR text (regex/anchor based, v1).
-# Written from the one Thai label we have (KEX) plus carrier names; extend with real labels.
-# Do not guess tracking formats: a wrong pattern quietly routes good labels to review or accepts
-# a wrong number. Carriers without a pattern are found by keyword only.
-version: rules-1
+# Rules for reading the fields of a shipping label from OCR text (regex/anchor/geometry, v1).
+# Everything the extractor knows about a brand lives here, not in the code. Tuned on one sample
+# each of KEX, Flash Express, J&T, SPX, Shopee Food, Ninja Van and DHL Paket: extend it with more
+# real labels. Do not guess tracking formats: a wrong pattern quietly routes good labels to review
+# or accepts a wrong number. A carrier without a pattern is still found by its keywords.
+version: rules-2
 
+# --- carrier ---------------------------------------------------------------------------------
+# keywords: matched case-insensitively as whole words in any OCR line (a keyword glued to other
+#   letters or digits does not match). tracking_patterns: full-match regexes on a tracking number
+#   with spaces and dashes removed, upper-cased; a match also identifies the carrier.
+# Two different carriers on one label -> no carrier is returned (the officer decides).
 carriers:
   kex:
     display: KEX
@@ -15,32 +21,78 @@ carriers:
     tracking_patterns: ['[A-Z]{2}\d{9}TH']
   flash:
     display: Flash Express
-    keywords: ["flash express", "แฟลช"]
+    keywords: ["flash express", "flash", "แฟลช"]
   jt:
     display: J&T Express
-    keywords: ["j&t", "j&t express"]
+    keywords: ["j&t", "j&t express", "j&texpress", "jt express", "เจแอนด์ที"]
+    # J&T prints a digits-only number under its barcode. Digits alone are not taken for any other
+    # carrier (a phone number looks the same); here it is taken only when exactly one line fits.
+    tracking_digits: '\d{9,15}'
   spx:
     display: SPX
     keywords: ["spx", "shopee express"]
-  lex:
-    display: LEX
-    keywords: ["lazada express"]
+    tracking_patterns: ['TH\d{12}[A-Z0-9]']  # from the SPX sample label
+  shopee_food:
+    display: Shopee Food
+    keywords: ["shopeefood", "shopee food", "shp food"]
+    # The only number on a Shopee Food label is its order number: use it as the tracking number.
+    # (On an SPX or J&T label the order number is NOT the tracking number, so this is per carrier.)
+    tracking_from: ["คำสั่งซื้อ", "shopee order no", "order no"]
   ninjavan:
     display: Ninja Van
     keywords: ["ninja van", "ninjavan"]
+  lex:
+    display: LEX
+    keywords: ["lazada express"]
   dhl:
     display: DHL
     keywords: ["dhl"]
 
-# A line that looks like a tracking number when spaces and dashes are removed.
+# --- tracking number -------------------------------------------------------------------------
+# A printed line that looks like a tracking number (after removing spaces/dashes). A line equal to
+# a decoded barcode wins over everything. Plain digit lines are never taken (phones look alike).
 generic_tracking_pattern: '[A-Z]{2,5}\d{8,15}[A-Z]{0,3}'
+# A QR code is used as the barcode value only when its whole text looks like a tracking number.
 
-# The recipient block starts after one of these; the sender block is never read as the recipient.
+# --- confidence ------------------------------------------------------------------------------
+# What Parcel is told. A field read by rules is less certain than the OCR's own line score, which
+# only says how clearly the characters were read, not whether the rule picked the right line. So:
+# confidence = OCR score x factor, never above max. A decoded barcode is exact, so it is not scaled.
+# Parcel marks anything below its MIN_FIELD_CONFIDENCE (0.95) as uncertain, so these fields are
+# always shown for an officer to check; raise the numbers only when the rules are proven on real labels.
+confidence:
+  CARRIER: {factor: 0.9, max: 0.9}
+  TRACKING_TEXT: {factor: 0.9, max: 0.9}
+  TRACKING_BARCODE: {factor: 1.0, max: 0.99}
+  RECIPIENT: {factor: 0.85, max: 0.85}
+  ADDRESS: {factor: 0.8, max: 0.8}
+
+# --- recipient and address -------------------------------------------------------------------
+# A line starting with one of these (after "ผู้รับ" style anchors, the rest of the line is the name):
 recipient_anchors: ["ผู้รับ", "ชื่อผู้รับ", "ผู้รับสินค้า", "receiver", "recipient", "ship to", "deliver to", "to:"]
+# Markers that identify the recipient line even when the Thai word before them is misread
+# ("ผู้รับ (TO)" came out as "ูรับ (TO)" on a photographed label). The name follows the marker.
+recipient_markers: ["(to)"]
+# Layouts with "Name:" / "Address:" rows under a header (Ninja Van). Rows end at a stop header.
+labelled_headers: ["recipient details", "penerima"]
+labelled_stops: ["pod", "sender details", "order details"]
+name_labels: ["name:", "nama:"]
+address_labels: ["address:", "alamat:"]
+# Address on the same line as its anchor (KEX): "ที่อยู่: ..." plus the lines after it.
 address_anchors: ["ที่อยู่", "ที่อยู่ผู้รับ", "address", "addr"]
-# The address stops at the first line starting with one of these (or after max_address_lines).
-stop_anchors: ["หมายเหตุ", "โทร", "tel", "cw", "wt", "note", "remark", "["]
+# After the name, the address is the lines below it that start at the same left edge, one under
+# the other (a vertical gap of more than gap_lines line heights ends it). It also ends at a line
+# starting with a stop word, or after max_address_lines.
+stop_anchors: ["หมายเหตุ", "โทร", "tel", "phone", "fax", "postcode", "pickup", "ship by", "order", "cod", "pod", "note", "remark", "cw", "wt", "["]
+# The address also ends at a line that contains one of these words, or that is a tracking number.
+stop_contains: ["order no", "pickup date", "ship by"]
 max_address_lines: 4
+gap_lines: 1.2
+# Removed from the start of a recipient name ("คุณสมชาย ใจดี" -> "สมชาย ใจดี"), so it can be
+# matched against the residents.
+name_prefixes: ["คุณ", "นางสาว", "นาง", "นาย", "mr.", "mrs.", "ms.", "miss"]
+# A value right after the anchor that is not a name (a zone code like "Z1"): the name is on the next line.
+ignore_inline_value: '^[A-Za-z]\d{1,3}$'
 
 # Form-style labels (DHL Paket): the recipient is a column of handwritten lines under a header, mixed
 # with printed captions. Lines left-aligned with the header (and below it) belong to the block; the

@@ -31,8 +31,8 @@ app = FastAPI(title="TMA OCR", version="0.1.0", lifespan=lifespan)
 
 @app.get("/health")
 def health():
-    return {"status": "ok" if "pipeline" in state else "loading", "device": settings.device,
-            "det": settings.det_model, "rec": settings.rec_dir or settings.rec_model}
+    # Deliberately nothing about which models or libraries are loaded: callers may be clients.
+    return {"status": "ok" if "pipeline" in state else "loading"}
 
 
 def _decode(upload: UploadFile) -> np.ndarray:
